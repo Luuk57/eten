@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wat at ik?</title>
+    <title>Mijn Eetdagboek</title>
+    <!-- JsPDF bibliotheek voor het maken van de PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -26,14 +28,23 @@
             box-shadow: 0 4px 10px rgba(0,0,0,0.05);
             margin-bottom: 20px;
         }
-        textarea {
+        label {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 6px;
+            margin-top: 10px;
+        }
+        select, textarea {
             width: 100%;
-            height: 100px;
             padding: 12px;
             font-size: 16px;
             border: 1px solid #ccc;
             border-radius: 8px;
             box-sizing: border-box;
+            background: #fff;
+        }
+        textarea {
+            height: 90px;
             resize: vertical;
         }
         button {
@@ -46,10 +57,14 @@
             font-weight: bold;
             border-radius: 8px;
             cursor: pointer;
-            margin-top: 10px;
+            margin-top: 15px;
         }
         button:active {
             background: #219653;
+        }
+        .btn-pdf {
+            background: #2980b9;
+            margin-top: 10px;
         }
         .entry {
             background: #fff;
@@ -59,88 +74,154 @@
             border-left: 5px solid #27ae60;
             box-shadow: 0 2px 5px rgba(0,0,0,0.03);
         }
-        .entry-time {
-            font-size: 12px;
-            color: #888;
+        .entry-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            color: #666;
             margin-bottom: 4px;
+        }
+        .entry-moment {
+            font-weight: bold;
+            color: #2c3e50;
         }
         .entry-text {
             font-size: 16px;
             white-space: pre-wrap;
+            margin-bottom: 8px;
         }
-        .actions {
+        .entry-actions {
             display: flex;
-            justify-content: space-between;
-            margin-top: 20px;
+            gap: 10px;
         }
-        .btn-secondary {
-            background: #e74c3c;
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            border-radius: 6px;
-            font-size: 14px;
-            cursor: pointer;
+        .entry-actions button {
+            padding: 5px 10px;
+            font-size: 12px;
+            margin: 0;
             width: auto;
+        }
+        .btn-edit { background: #f39c12; }
+        .btn-delete { background: #e74c3c; }
+        
+        .filters {
+            background: #fff;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
         }
     </style>
 </head>
 <body>
 
-    <h2>Eetmomenten Logboek</h2>
+    <h2>Mijn Eetdagboek</h2>
 
+    <!-- Invoer Formulier -->
     <div class="card">
-        <label for="etenInput" style="font-weight: bold; display: block; margin-bottom: 8px;">Wat heb je gegeten / gedronken?</label>
-        <textarea id="etenInput" placeholder="Typ hier wat je op dit moment eet..."></textarea>
-        <button onclick="slaEtenOp()">Opslaan</button>
+        <input type="hidden" id="editIndex" value="">
+        
+        <label for="momentSelect">Wanneer?</label>
+        <select id="momentSelect">
+            <option value="Ontbijt">Ontbijt</option>
+            <option value="Lunch">Lunch</option>
+            <option value="Avondeten">Avondeten</option>
+            <option value="Tussendoor">Tussendoor</option>
+        </select>
+
+        <label for="etenInput">Wat heb je gegeten / gedronken?</label>
+        <textarea id="etenInput" placeholder="Typ hier wat je hebt genuttigd..."></textarea>
+        
+        <button id="saveBtn" onclick="slaEtenOp()">Opslaan</button>
     </div>
 
-    <h3>Eerdere momenten</h3>
+    <!-- Filter / PDF Export Optie -->
+    <div class="filters">
+        <label>PDF Rapport Periode</label>
+        <div style="display: flex; gap: 10px;">
+            <input type="date" id="startDatum" style="flex:1; padding:8px; border-radius:6px; border:1px solid #ccc;">
+            <input type="date" id="eindDatum" style="flex:1; padding:8px; border-radius:6px; border:1px solid #ccc;">
+        </div>
+        <button class="btn-pdf" onclick="genereerPDF()">Download PDF overzicht</button>
+    </div>
+
+    <h3>Overzicht van vandaag</h3>
     <div id="lijstContainer"></div>
 
-    <div class="actions">
-        <button class="btn-secondary" onclick="wisAlles()">Alles wissen</button>
-    </div>
-
 <script>
-    document.addEventListener("DOMContentLoaded", laadEten);
+    // Controleer om middernacht of reset nodig is
+    document.addEventListener("DOMContentLoaded", () => {
+        checkMidnightReset();
+        laadEten();
+        
+        // Zet standaard datums voor PDF op vandaag
+        const vandaag = new Date().toISOString().split('T')[0];
+        document.getElementById('startDatum').value = vandaag;
+        document.getElementById('eindDatum').value = vandaag;
+    });
+
+    function checkMidnightReset() {
+        const laatsteDatum = localStorage.getItem('laatsteActieveDatum');
+        const vandaag = new Date().toDateString();
+
+        if (laatsteDatum !== vandaag) {
+            // Nieuwe dag ontdekt! Gegevens van vandaag leegmaken (historie blijft wel bewaard voor PDF)
+            // We slaan alle items op in een archief-lijst, en legen de dag-lijst.
+            archiveerHuidigeDag();
+            localStorage.setItem('laatsteActieveDatum', vandaag);
+        }
+    }
+
+    function archiveerHuidigeDag() {
+        let huidig = JSON.parse(localStorage.getItem('eetMomenten')) || [];
+        if (huidig.length > 0) {
+            let archief = JSON.parse(localStorage.getItem('eetArchief')) || [];
+            archief.push(...huidig);
+            localStorage.setItem('eetArchief', JSON.stringify(archief));
+            localStorage.removeItem('eetMomenten'); // Leeg maken voor de nieuwe dag
+        }
+    }
 
     function slaEtenOp() {
+        const moment = document.getElementById('momentSelect').value;
         const input = document.getElementById('etenInput');
         const tekst = input.value.trim();
-        
+        const editIndex = document.getElementById('editIndex').value;
+
         if (!tekst) {
-            alert("Typ eerst even wat je hebt gegeten.");
+            alert("Vul even in wat je hebt gegeten.");
             return;
         }
 
         const nu = new Date();
-        const datumTijd = nu.toLocaleString('nl-NL', { 
-            weekday: 'short', 
-            day: 'numeric', 
-            month: 'short', 
-            hour: '2-digit', 
-            minute: '2-digit' 
-        });
-
-        const nieuweItem = {
-            tijd: datumTijd,
-            inhoud: tekst
-        };
+        const datumIso = nu.toISOString().split('T')[0]; // YYYY-MM-DD
+        const tijdStr = nu.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+        const datumTijdWeergave = `${nu.toLocaleDateString('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' })} om ${tijdStr}`;
 
         let opgeslagen = JSON.parse(localStorage.getItem('eetMomenten')) || [];
-        opgeslagen.unshift(nuEersteItemOfVoegToe(nieuweItem, opgeslagen));
-        
-        // Sla op
+
+        if (editIndex === "") {
+            // Nieuw item toevoegen (nieuwste bovenaan)
+            const nieuwItem = {
+                id: Date.now(),
+                datumIso: datumIso,
+                tijd: datumTijdWeergave,
+                moment: moment,
+                inhoud: tekst
+            };
+            opgeslagen.unshift(nieuwItem);
+        } else {
+            // Bestaande bewerken
+            opgeslagen[editIndex].moment = moment;
+            opgeslagen[editIndex].inhoud = tekst;
+            // Reset bewerk modus
+            document.getElementById('editIndex').value = "";
+            document.getElementById('saveBtn').innerText = "Opslaan";
+        }
+
         localStorage.setItem('eetMomenten', JSON.stringify(opgeslagen));
         
         input.value = '';
         laadEten();
-    }
-
-    function nuEersteItemOfVoegToe(item, lijst) {
-        lijst.unshift(item);
-        return lijst;
     }
 
     function laadEten() {
@@ -148,7 +229,7 @@
         const opgeslagen = JSON.parse(localStorage.getItem('eetMomenten')) || [];
         
         if (opgeslagen.length === 0) {
-            container.innerHTML = '<p style="color: #777; text-align: center;">Nog niets genoteerd vandaag.</p>';
+            container.innerHTML = '<p style="color: #777; text-align: center;">Nog niets genoteerd voor vandaag.</p>';
             return;
         }
 
@@ -156,19 +237,97 @@
         opgeslagen.forEach((item, index) => {
             html += `
                 <div class="entry">
-                    <div class="entry-time">${item.tijd}</div>
+                    <div class="entry-header">
+                        <span class="entry-moment">${item.moment}</span>
+                        <span>${item.tijd}</span>
+                    </div>
                     <div class="entry-text">${escapeHtml(item.inhoud)}</div>
+                    <div class="entry-actions">
+                        <button class="btn-edit" onclick="bewerkItem(${index})">Bewerk</button>
+                        <button class="btn-delete" onclick="verwijderItem(${index})">Verwijder</button>
+                    </div>
                 </div>
             `;
         });
         container.innerHTML = html;
     }
 
-    function wisAlles() {
-        if (confirm("Weet je zeker dat je al je notities wilt wissen?")) {
-            localStorage.removeItem('eetMomenten');
+    function bewerkItem(index) {
+        let opgeslagen = JSON.parse(localStorage.getItem('eetMomenten')) || [];
+        let item = opgeslagen[index];
+
+        document.getElementById('momentSelect').value = item.moment;
+        document.getElementById('etenInput').value = item.inhoud;
+        document.getElementById('editIndex').value = index;
+        document.getElementById('saveBtn').innerText = "Wijziging Opslaan";
+        
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function verwijderItem(index) {
+        if (confirm("Weet je zeker dat je dit wilt verwijderen?")) {
+            let opgeslagen = JSON.parse(localStorage.getItem('eetMomenten')) || [];
+            opgeslagen.splice(index, 1);
+            localStorage.setItem('eetMomenten', JSON.stringify(opgeslagen));
             laadEten();
         }
+    }
+
+    function genereerPDF() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        const start = document.getElementById('startDatum').value;
+        const eind = document.getElementById('eindDatum').value;
+
+        if (!start || !eind) {
+            alert("Selecteer een start- en einddatum voor de PDF.");
+            return;
+        }
+
+        // Verzamel actieve en gearchiveerde items
+        let actueel = JSON.parse(localStorage.getItem('eetMomenten')) || [];
+        let archief = JSON.parse(localStorage.getItem('eetArchief')) || [];
+        let alleItems = [...actueel, ...archief];
+
+        // Filter op gekozen datumbereik
+        let gefilterd = alleItems.filter(item => {
+            return item.datumIso >= start && item.datumIso <= eind;
+        });
+
+        if (gefilterd.length === 0) {
+            alert("Geen gegevens gevonden in deze periode.");
+            return;
+        }
+
+        // PDF opbouwen
+        doc.setFontSize(18);
+        doc.text("Eetdagboek Overzicht", 14, 20);
+        
+        doc.setFontSize(11);
+        doc.setTextColor(100);
+        doc.text(`Periode: ${start} tot ${eind}`, 14, 28);
+
+        let y = 38;
+        doc.setTextColor(0);
+
+        gefilterd.forEach((item, index) => {
+            if (y > 270) { // Nieuwe pagina indien nodig
+                doc.addPage();
+                y = 20;
+            }
+
+            doc.setFont(undefined, 'bold');
+            doc.text(`${item.tijd} - [${item.moment}]`, 14, y);
+            y += 6;
+
+            doc.setFont(undefined, 'normal');
+            let splitText = doc.splitTextToSize(item.inhoud, 180);
+            doc.text(splitText, 14, y);
+            y += (splitText.length * 6) + 6;
+        });
+
+        doc.save(`eetdagboek_${start}_tot_${eind}.pdf`);
     }
 
     function escapeHtml(text) {
