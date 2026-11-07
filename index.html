@@ -4,8 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mijn Eetdagboek</title>
+    
+    <!-- PWA Meta Tags -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#27ae60">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Eetdagboek">
+
     <!-- JsPDF bibliotheek voor het maken van de PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -148,12 +157,17 @@
     <div id="lijstContainer"></div>
 
 <script>
-    // Controleer om middernacht of reset nodig is
+    // PWA Service Worker registreren
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('service-worker.js')
+            .then(() => console.log("Service Worker geregistreerd!"))
+            .catch(err => console.log("Service Worker mislukt: ", err));
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
         checkMidnightReset();
         laadEten();
         
-        // Zet standaard datums voor PDF op vandaag
         const vandaag = new Date().toISOString().split('T')[0];
         document.getElementById('startDatum').value = vandaag;
         document.getElementById('eindDatum').value = vandaag;
@@ -164,8 +178,6 @@
         const vandaag = new Date().toDateString();
 
         if (laatsteDatum !== vandaag) {
-            // Nieuwe dag ontdekt! Gegevens van vandaag leegmaken (historie blijft wel bewaard voor PDF)
-            // We slaan alle items op in een archief-lijst, en legen de dag-lijst.
             archiveerHuidigeDag();
             localStorage.setItem('laatsteActieveDatum', vandaag);
         }
@@ -177,7 +189,7 @@
             let archief = JSON.parse(localStorage.getItem('eetArchief')) || [];
             archief.push(...huidig);
             localStorage.setItem('eetArchief', JSON.stringify(archief));
-            localStorage.removeItem('eetMomenten'); // Leeg maken voor de nieuwe dag
+            localStorage.removeItem('eetMomenten');
         }
     }
 
@@ -193,14 +205,13 @@
         }
 
         const nu = new Date();
-        const datumIso = nu.toISOString().split('T')[0]; // YYYY-MM-DD
+        const datumIso = nu.toISOString().split('T')[0];
         const tijdStr = nu.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
         const datumTijdWeergave = `${nu.toLocaleDateString('nl-NL', { weekday: 'short', day: 'numeric', month: 'short' })} om ${tijdStr}`;
 
         let opgeslagen = JSON.parse(localStorage.getItem('eetMomenten')) || [];
 
         if (editIndex === "") {
-            // Nieuw item toevoegen (nieuwste bovenaan)
             const nieuwItem = {
                 id: Date.now(),
                 datumIso: datumIso,
@@ -210,10 +221,8 @@
             };
             opgeslagen.unshift(nieuwItem);
         } else {
-            // Bestaande bewerken
             opgeslagen[editIndex].moment = moment;
             opgeslagen[editIndex].inhoud = tekst;
-            // Reset bewerk modus
             document.getElementById('editIndex').value = "";
             document.getElementById('saveBtn').innerText = "Opslaan";
         }
@@ -285,12 +294,10 @@
             return;
         }
 
-        // Verzamel actieve en gearchiveerde items
         let actueel = JSON.parse(localStorage.getItem('eetMomenten')) || [];
         let archief = JSON.parse(localStorage.getItem('eetArchief')) || [];
         let alleItems = [...actueel, ...archief];
 
-        // Filter op gekozen datumbereik
         let gefilterd = alleItems.filter(item => {
             return item.datumIso >= start && item.datumIso <= eind;
         });
@@ -300,7 +307,6 @@
             return;
         }
 
-        // PDF opbouwen
         doc.setFontSize(18);
         doc.text("Eetdagboek Overzicht", 14, 20);
         
@@ -311,8 +317,8 @@
         let y = 38;
         doc.setTextColor(0);
 
-        gefilterd.forEach((item, index) => {
-            if (y > 270) { // Nieuwe pagina indien nodig
+        gefilterd.forEach((item) => {
+            if (y > 270) {
                 doc.addPage();
                 y = 20;
             }
