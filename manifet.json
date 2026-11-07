@@ -1,0 +1,9 @@
+{
+  "name": "Mijn Eetdagboek",
+  "short_name": "Eetdagboek",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#f4f6f8",
+  "theme_color": "#27ae60",
+  "icons": []
+}
